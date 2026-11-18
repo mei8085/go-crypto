@@ -235,13 +235,25 @@ func Parse(r io.Reader) (f func(out, in []byte), err error) {
 	return params.Function()
 }
 
+// readFull is the same as io.ReadFull except that running out of input is
+// reported as io.ErrUnexpectedEOF, matching the packet package's convention.
+// A bare io.EOF must not escape from here: callers treat io.EOF as the clean
+// end of a packet stream, and a truncated s2k specifier must instead surface
+// as a parse error.
+func readFull(r io.Reader, buf []byte) error {
+	_, err := io.ReadFull(r, buf)
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
+	return err
+}
+
 // ParseIntoParams reads a binary specification for a string-to-key
 // transformation from r and returns a struct describing the s2k parameters.
 func ParseIntoParams(r io.Reader) (params *Params, err error) {
 	var buf [Argon2SaltSize + 3]byte
 
-	_, err = io.ReadFull(r, buf[:1])
-	if err != nil {
+	if err = readFull(r, buf[:1]); err != nil {
 		return
 	}
 
@@ -251,23 +263,20 @@ func ParseIntoParams(r io.Reader) (params *Params, err error) {
 
 	switch params.mode {
 	case SimpleS2K:
-		_, err = io.ReadFull(r, buf[:1])
-		if err != nil {
+		if err = readFull(r, buf[:1]); err != nil {
 			return nil, err
 		}
 		params.hashId = buf[0]
 		return params, nil
 	case SaltedS2K:
-		_, err = io.ReadFull(r, buf[:9])
-		if err != nil {
+		if err = readFull(r, buf[:9]); err != nil {
 			return nil, err
 		}
 		params.hashId = buf[0]
 		copy(params.salt(), buf[1:9])
 		return params, nil
 	case IteratedSaltedS2K:
-		_, err = io.ReadFull(r, buf[:10])
-		if err != nil {
+		if err = readFull(r, buf[:10]); err != nil {
 			return nil, err
 		}
 		params.hashId = buf[0]
@@ -275,8 +284,7 @@ func ParseIntoParams(r io.Reader) (params *Params, err error) {
 		params.countByte = buf[9]
 		return params, nil
 	case Argon2S2K:
-		_, err = io.ReadFull(r, buf[:Argon2SaltSize+3])
-		if err != nil {
+		if err = readFull(r, buf[:Argon2SaltSize+3]); err != nil {
 			return nil, err
 		}
 		copy(params.salt(), buf[:Argon2SaltSize])
@@ -290,7 +298,7 @@ func ParseIntoParams(r io.Reader) (params *Params, err error) {
 	case GnuS2K:
 		// This is a GNU extension. See
 		// https://git.gnupg.org/cgi-bin/gitweb.cgi?p=gnupg.git;a=blob;f=doc/DETAILS;h=fe55ae16ab4e26d8356dc574c9e8bc935e71aef1;hb=23191d7851eae2217ecdac6484349849a24fd94a#l1109
-		if _, err = io.ReadFull(r, buf[:5]); err != nil {
+		if err = readFull(r, buf[:5]); err != nil {
 			return nil, err
 		}
 		params.hashId = buf[0]

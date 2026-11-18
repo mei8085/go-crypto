@@ -64,6 +64,12 @@ func (se *SymmetricallyEncrypted) parse(r io.Reader) error {
 // packet can be read. An incorrect key will only be detected after trying
 // to decrypt the entire data.
 func (se *SymmetricallyEncrypted) Decrypt(c CipherFunction, key []byte) (io.ReadCloser, error) {
+	if se.Contents == nil {
+		// The packet did not parse completely, so there is no ciphertext to
+		// decrypt. Do not hand out a reader for a partially initialized
+		// packet.
+		return nil, errors.StructuralError("encrypted data packet was not parsed completely")
+	}
 	if se.Version == symmetricallyEncryptedVersionAead {
 		return se.decryptAead(key)
 	}

@@ -82,9 +82,21 @@ type seMDCReader struct {
 	trailerUsed int
 	error       bool
 	eof         bool
+	closed      bool
+	closeErr    error
 }
 
 func (ser *seMDCReader) Read(buf []byte) (n int, err error) {
+	if ser.closed {
+		// The MDC (or its absence) has already been checked. Never return
+		// plaintext from a stream whose integrity was not confirmed.
+		if ser.closeErr != nil {
+			err = ser.closeErr
+		} else {
+			err = io.EOF
+		}
+		return
+	}
 	if ser.error {
 		err = io.ErrUnexpectedEOF
 		return
@@ -146,7 +158,21 @@ func (ser *seMDCReader) Read(buf []byte) (n int, err error) {
 // This is a new-format packet tag byte for a type 19 (Integrity Protected) packet.
 const mdcPacketTagByte = byte(0x80) | 0x40 | 19
 
+// Close reads any unread ciphertext and verifies the MDC trailer.
+// Close is idempotent: the result of the first call is cached and returned by
+// all later calls and by any subsequent Read. This prevents a caller that
+// closed a bad stream early from continuing to read unauthenticated plaintext.
 func (ser *seMDCReader) Close() error {
+	if ser.closed {
+		return ser.closeErr
+	}
+
+	ser.closeErr = ser.checkMDC()
+	ser.closed = true
+	return ser.closeErr
+}
+
+func (ser *seMDCReader) checkMDC() error {
 	if ser.error {
 		return errors.ErrMDCHashMismatch
 	}

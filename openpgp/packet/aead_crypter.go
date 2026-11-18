@@ -63,12 +63,22 @@ type aeadDecrypter struct {
 	chunkBytes  []byte
 	peekedBytes []byte    // Used to detect last chunk
 	buffer      []byte    // Buffered decrypted bytes
+	closeErr    error     // Result of the final authentication check, sticky once Close was called
+	closed      bool
 }
 
 // Read decrypts bytes and reads them into dst. It decrypts when necessary and
 // buffers extra decrypted bytes. It returns the number of bytes copied into dst
 // and an error.
 func (ar *aeadDecrypter) Read(dst []byte) (n int, err error) {
+	if ar.closed {
+		// The stream was closed and the final tag was checked. Do not return
+		// any more plaintext from a stream whose integrity was not confirmed.
+		if ar.closeErr != nil {
+			return 0, ar.closeErr
+		}
+		return 0, io.EOF
+	}
 	// Return buffered plaintext bytes from previous calls
 	if len(ar.buffer) > 0 {
 		n = copy(dst, ar.buffer)
@@ -104,12 +114,17 @@ func (ar *aeadDecrypter) Read(dst []byte) (n int, err error) {
 // Close checks the final authentication tag of the stream.
 // In the future, this function could also be used to wipe the reader
 // and peeked & decrypted bytes, if necessary.
+// Close is idempotent: the result of the first call is cached and returned by
+// all later calls and by any subsequent Read.
 func (ar *aeadDecrypter) Close() (err error) {
-	errChunk := ar.validateFinalTag(ar.peekedBytes)
-	if errChunk != nil {
-		return errChunk
+	if ar.closed {
+		return ar.closeErr
 	}
-	return nil
+	ar.closed = true
+	if errChunk := ar.validateFinalTag(ar.peekedBytes); errChunk != nil {
+		ar.closeErr = errChunk
+	}
+	return ar.closeErr
 }
 
 // openChunk decrypts and checks integrity of an encrypted chunk, returning

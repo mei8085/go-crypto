@@ -120,6 +120,12 @@ func (ske *SymmetricKeyEncrypted) parse(r io.Reader) error {
 // the cipher to use when decrypting a subsequent Symmetrically Encrypted Data
 // packet.
 func (ske *SymmetricKeyEncrypted) Decrypt(passphrase []byte) ([]byte, CipherFunction, error) {
+	if ske.s2k == nil {
+		// The packet did not parse completely, so there is no S2K
+		// function to derive a key with. Refuse to produce a session key
+		// from a partially initialized packet.
+		return nil, CipherFunction(0), errors.StructuralError("session key packet was not parsed completely")
+	}
 	key := make([]byte, ske.CipherFunc.KeySize())
 	ske.s2k(key, passphrase)
 	if len(ske.encryptedKey) == 0 {

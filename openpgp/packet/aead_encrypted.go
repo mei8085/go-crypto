@@ -66,6 +66,12 @@ func (ae *AEADEncrypted) Decrypt(ciph CipherFunction, key []byte) (io.ReadCloser
 // decrypt prepares an aeadCrypter and returns a ReadCloser from which
 // decrypted bytes can be read (see aeadDecrypter.Read()).
 func (ae *AEADEncrypted) decrypt(key []byte) (io.ReadCloser, error) {
+	if ae.Contents == nil {
+		// The packet did not parse completely, so there is no ciphertext to
+		// decrypt. Do not hand out a reader for a partially initialized
+		// packet.
+		return nil, errors.StructuralError("AEAD encrypted packet was not parsed completely")
+	}
 	if ae.cipher.KeySize() != len(key) {
 		return nil, errors.StructuralError("invalid session key length for cipher: got " + strconv.Itoa(len(key)) + " bytes, but expected " + strconv.Itoa(ae.cipher.KeySize()) + " bytes")
 	}
